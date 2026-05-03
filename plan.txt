@@ -1,0 +1,463 @@
+In the ColabCode folder there is a python script combinedradarscan.py this runs up to 4 different LLM runs, BrandRadar, SocialRadar, CultureConverts and CultureConnects
+
+I would like to be able to use the pro batch API
+
+Upload a sample spreadsheet
+
+Running a loop of 100 brands sequentially at 60+ seconds per request will take you over an hour and a half to complete. Since you are performing data-heavy research (social media stats and market views), the Gemini 3.1 Pro Preview is likely spending most of that "minute" in its Deep Think reasoning phase, which is overkill for simple data retrieval.
+Here is how to optimize that 100-brand loop for speed and efficiency.
+1. Adjust the thinking_level Parameter
+In the 3.1 Pro Preview, the primary speed bottleneck is the internal reasoning tokens. By default, the model tries to "over-think" the market analysis.
+• Change thinking_level to "MEDIUM" or "LOW": The MEDIUM setting was specifically introduced to balance reasoning depth with speed. For brand stats, LOW is usually sufficient and can reduce your Time-to-First-Token (TTFT) from 40+ seconds down to under 5 seconds.
+• Keep Temperature at 1.0: While it doesn't directly speed up the hardware, lower temperatures in the 3.1 series have been reported to cause "logic loops" where the model gets stuck in its thinking phase, causing the API to hang or time out.
+2. Use the Batch API (Recommended)
+If you don't need the results for these 100 brands instantly in a UI, stop using a standard loop and use the Gemini Batch API.
+• How it works: You submit a single .jsonl file containing all 100 requests.
+• Benefit: It bypasses the standard rate limits and is significantly cheaper (often 50% less). While it may take 20–30 minutes to complete the whole batch, it doesn't tie up your local script in a slow loop, and it handles retries automatically.
+3. Parallelize Your Loop
+If you must use a real-time loop, do not run them 1-at-a-time. Use a thread pool to run multiple requests in parallel.
+• The Sweet Spot: For Gemini 3.1 Pro Preview, try a concurrency of 5 to 10 simultaneous requests (depending on your Tier's Rate Limit/RPM).
+• Python Example: from concurrent.futures import ThreadPoolExecutor # With 10 workers, your 100-brand task drops from ~100 mins to ~10-15 mins. with ThreadPoolExecutor(max_workers=10) as executor:     results = list(executor.map(query_brand_data, brand_list))
+4. Consider "Flash-Lite" for Stats
+For social media stats (numbers, follower counts, etc.), Gemini 3.1 Flash-Lite is almost 3x faster than Pro.
+• The "Hybrid" Strategy: Use Flash-Lite to extract the raw stats and Pro only for the "Market View" (sentiment/analysis). This will slash your costs and your total execution time.
+Settings Cheat Sheet for Brand Analysis
+Parameter	Recommended Value	Impact on Speed
+Model	gemini-3.1-pro-preview	Slow (Deep Reasoning)
+Thinking Level	"MEDIUM"	High (Saves ~30s per call)
+Temperature	1.0	Moderate (Prevents logic hangs)
+Grounding	Google Search	Essential (For live social stats)
+Request Type	Batch API	Highest (For 100+ items)
+Pro Tip: If you are using Google Search Grounding to get these stats, ensure you are using the dynamic_retrieval_threshold. Setting this correctly ensures the model only "searches" when necessary, saving you seconds on brands that it might already have cached data for.
+Are you using a specific library (like Python's google-generativeai or Vertex AI) to run this loop?
+
+Since you are using the google-generativeai library (the legacy SDK) in 2026, you are likely hitting a "compatibility wall."
+By default, the Gemini 3.1 Pro Preview model uses its Deep Think (High reasoning) mode. Because the legacy library doesn't always expose the new 2026 thinking_config parameters, the model defaults to its most complex (and slowest) behavior.
+To process 100 brands without waiting over an hour, you should make these three adjustments:
+1. Migrate to the google-genai SDK
+As of late 2025, Google replaced the old library with the unified google-genai SDK. This is the only way to explicitly control the "Thinking" behavior that is causing your 60-second delays.
+To fix the speed, set your thinking_level to "LOW". This tells the model to skip the deep internal reasoning loops and jump straight to the answer, which is perfect for stats and brand facts.
+# The 2026 Standard for Speed
+from google import genai
+from google.genai import types
+
+client = genai.Client(api_key="YOUR_API_KEY")
+
+response = client.models.generate_content(
+    model="gemini-3.1-pro-preview",
+    contents="What are the latest social stats for Nike?",
+    config=types.GenerateContentConfig(
+        # This is the "Magic Dial" for speed
+        thinking_config=types.ThinkingConfig(thinking_level="LOW"),
+        temperature=1.0,
+        # Grounding is essential for real-time brand stats
+        tools=[types.Tool(google_search=types.GoogleSearchRetrieval())]
+    )
+)
+
+2. Use Parallel Processing (The "Loop" Fix)
+Running 100 brands sequentially (one after another) is the slowest possible method. Even with thinking_level="LOW", you'll have network overhead. You should run these in parallel using a ThreadPoolExecutor.
+import concurrent.futures
+
+def get_brand_data(brand_name):
+    # API call logic here
+    pass
+
+brands = ["Brand1", "Brand2", ..., "Brand100"]
+
+# Running 10 at a time reduces total time by ~90%
+with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    results = list(executor.map(get_brand_data, brands))
+
+3. Use the Batch API (The "Pro" Fix)
+If you don't need the results instantly (e.g., if you can wait 15 minutes for all 100 to finish), use the Batch API.
+• Cost: Usually 50% cheaper than real-time calls.
+• Speed: It processes all 100 brands in the background.
+• Reliability: It handles its own retries if a brand query fails.
+Summary of Optimization
+Method	Expected Time for 100 Brands	Recommended Use Case
+Sequential Loop (Current)	~100 Minutes	Testing a single brand only.
+Parallel Loop (10 workers)	~10-12 Minutes	Real-time dashboards/UI.
+Batch API	~20 Minutes (Background)	Bulk research/Data collection.
+Flash-Lite 3.1 Model	~2 Minutes	If stats are more important than deep analysis.
+A Note on Temperature
+To answer your original concern: Temperature 1.0 is the "speed" setting for Gemini 3.1.
+• Lowering it (e.g., 0.1) for brand stats might seem logical, but it often forces the reasoning engine into "logic traps" where it keeps re-evaluating the same data points, actually increasing your latency.
+• Stick to 1.0 and use the thinking_level parameter to control the actual processing time.
+Would you like a full code template for setting up a Batch API job for your 100 brands?
+
+
+
+Yes, you absolutely can. In fact, Google Antigravity (the agent-first IDE released late last year) is arguably the most efficient way to build the modular pipeline we just discussed.
+While many people still think of "antigravity" as just that old Python joke that opens an XKCD comic, in 2026, it’s Google’s flagship platform for agentic development. It doesn't just "suggest" code; it functions as an autonomous collaborator that can plan, write, and—most importantly for your brand research—test and verify your logic in a live environment.
+How Antigravity Would Build Your Brand Research Tool
+Instead of you manually writing those 4 scripts, you would provide Antigravity with a "Mission." Because it has a massive Gemini 3 context window, it can digest your entire spreadsheet structure and API requirements at once.
+Here is how the workflow looks in Antigravity:
+1. The Mission: You feed it a prompt like: "Create a modular Python pipeline for 100-brand market research using the Gemini 3.1 Pro Batch API. Read from 'brands.csv', generate JSONL with Google Search grounding, and handle the batch monitoring loop."
+2. The Plan: Instead of just dumping code, Antigravity generates an Implementation Plan. It will suggest creating the 4-script modular structure we discussed earlier (Preprocessing, Submission, Monitoring, Exporting).
+3. Autonomous Execution: Once you approve the plan, the agent opens the terminal, installs the necessary google-genai and pandas libraries, and writes the code into your workspace.
+4. Verification: This is the "killer feature." Antigravity will actually run a test batch with 1 or 2 brands to ensure the JSONL formatting is correct and the API response maps back to your CSV correctly before you commit to the full 100-brand run.
+Using Antigravity vs. Colab Enterprise
+Since you mentioned you are in Colab Enterprise, it’s important to note the difference in "vibes":
+• Colab Enterprise is your Cloud Playground. It's perfect for when you want to run your code on Google’s infrastructure, share notebooks with stakeholders, and see live charts.
+• Antigravity is your Architect's Studio. It is a standalone IDE (a fork of VS Code) that you download. You would use Antigravity to build the complex scripts/notebooks, and then upload those finished "Artifacts" to Colab Enterprise to actually execute the 100-brand production run.
+Pro-Tip: Use "Planning Mode"
+When you open the Agent Side Panel in Antigravity (Cmd + L), make sure to toggle it to "Planning Mode" for this project.
+Because your task involves specific API parameters like thinking_level and Google Search tools, Planning Mode ensures the agent doesn't skip the "boring" but critical parts—like making sure your custom_id correctly tracks which brand is which in the Batch output.
+Your Antigravity "Mission" Prompt:
+"Act as a Lead Data Engineer. Build a production-grade brand analysis tool in Python. It must use the Gemini 3.1 Pro Preview Batch API with thinking_level='medium'. Use a spreadsheet as input and ensure every request is grounded with Google Search. Structure the code into a modular 'controller' format so I can run it in Colab Enterprise."
+If you describe it that fully, Antigravity won't just write the code—it'll practically hand you the keys to the finished project. Are you planning to download the IDE locally, or are you looking for the specific code snippets to stay strictly within the Colab browser?
+
+
+Since you are processing 100 brands and aiming for the best results, the Batch API is your best friend. It was specifically designed for this high-volume "research" use case.
+In 2026, the Gemini 3.1 Batch API allows you to process these in parallel at 50% of the cost of real-time calls. To answer your specific question: Yes, you can pass different sets of parameters, but you do so by creating separate entries (lines) for each brand-parameter combination in your input file.
+The Batch Workflow
+1. Preparing the "3 Sets" (The JSONL File)
+To run "3 sets of parameters" for each brand (e.g., three different temperatures or thinking levels), you simply create 3 lines per brand in a .jsonl file.
+Each line is a self-contained request. Here is how your requests.jsonl should look:
+{"request": {"contents": [{"parts": [{"text": "Stats for Nike"}],"role": "user"}], "generation_config": {"temperature": 0.2, "thinking_config": {"thinking_level": "LOW"}}}}
+{"request": {"contents": [{"parts": [{"text": "Stats for Nike"}],"role": "user"}], "generation_config": {"temperature": 1.0, "thinking_config": {"thinking_level": "MEDIUM"}}}}
+{"request": {"contents": [{"parts": [{"text": "Market view of Nike"}],"role": "user"}], "generation_config": {"temperature": 0.8, "thinking_config": {"thinking_level": "HIGH"}}}}
+
+2. Python Demo (using google-genai)
+As discussed, you should move from the legacy google-generativeai to the modern google-genai SDK for full 3.1 feature support.
+from google import genai
+from google.genai import types
+import time
+
+client = genai.Client(api_key="YOUR_API_KEY")
+
+# 1. Upload your JSONL file to the Gemini File Service
+# This file contains your 300 requests (100 brands * 3 parameter sets)
+input_file = client.files.upload(path="brands_research.jsonl")
+
+# 2. Create the Batch Job
+# Note: In 2026, Pro Preview supports 'thinking' as a batch parameter
+batch_job = client.batches.create(
+    model="gemini-3.1-pro-preview",
+    src=input_file.name,
+)
+
+print(f"Batch Job Created: {batch_job.name}")
+
+# 3. Monitor the Status
+while True:
+    job = client.batches.get(name=batch_job.name)
+    print(f"Status: {job.state}")
+    if job.state in ['SUCCEEDED', 'FAILED', 'CANCELLED']:
+        break
+    time.sleep(60) # Check every minute
+
+# 4. Retrieve Results
+if job.state == 'SUCCEEDED':
+    # Results are usually saved to a new file in the File Service
+    output_file_name = job.output_info.file_path
+    content = client.files.download(name=output_file_name)
+    print("Research complete. Data saved.")
+
+Strategic Advice for your 100 Brands
+Note on "3 Sets": If you are trying to find the "best" response by varying parameters, I highly recommend using the thinking_level as one of your variables.
+• Set 1 (Speed/Stats): thinking_level: "LOW", temperature: 1.0. (Best for follower counts and raw data).
+• Set 2 (Balanced): thinking_level: "MEDIUM", temperature: 1.0. (Best for general market sentiment).
+• Set 3 (Deep Analysis): thinking_level: "HIGH", temperature: 1.0. (Best for complex brand strategy).
+Why this is better than your current loop:
+1. Parallelization: Google handles the 100 brands at once on their backend. You aren't limited by your local machine's threading.
+2. Rate Limits: Batch jobs have much higher "per-minute" token limits than real-time API keys.
+3. Cost: Since you are doing 300 requests (100 brands × 3 sets), you will save roughly $15–$30 on this single run compared to real-time pricing.
+Important: Grounding
+Since social media stats are real-time, make sure your JSONL requests include the Google Search tool:
+"tools": [{"google_search": {}}]
+
+Without this, Gemini 3.1 will rely on its training data (cutoff Jan 2025), which will be useless for "current" social media stats in 2026.
+Does your current .jsonl generation script handle the inclusion of tools, or would you like a snippet for that as well?
+
+
+
+This is a common workflow for market research. Since you want to process 100 brands with specific attributes (brand, category, market) using the same optimized parameters, you can use a Python script to "bake" those spreadsheet values directly into your prompt.
+To get the best results in 2026, we’ll use thinking_level: "MEDIUM". This gives the model enough "reasoning time" to analyze the market view without the massive 60-second delay of the "HIGH" setting.
+1. Prepare your Spreadsheet
+Ensure your spreadsheet (CSV) has these exact column headers: brand, category, and market.
+brand	category	market
+Nike	Footwear	North America
+Samsung	Consumer Electronics	South Korea
+...	...	...
+2. The JSONL Generator Script
+This script reads your CSV and creates the requests.jsonl file. It includes the Google Search tool, which is mandatory if you want accurate social media stats in 2026.
+import pandas as pd
+import json
+
+# Load your data
+df = pd.read_csv("brands.csv")
+
+# Configuration (The "Same Parameters" for every request)
+MODEL_CONFIG = {
+    "temperature": 1.0,
+    "thinking_config": {"thinking_level": "MEDIUM"} 
+}
+
+jsonl_output = "brand_research_batch.jsonl"
+
+with open(jsonl_output, "w") as f:
+    for index, row in df.iterrows():
+        # Create a dynamic prompt using your spreadsheet columns
+        prompt_text = (
+            f"Perform a market analysis for the brand '{row['brand']}' "
+            f"within the '{row['category']}' category for the '{row['market']}' market. "
+            f"Provide current social media engagement stats and a summary of "
+            f"the brand's perception in this specific region."
+        )
+
+        # Build the JSON object for this specific line
+        request_line = {
+            "key": f"req_{index}_{row['brand'].replace(' ', '_')}", # Unique ID for results
+            "request": {
+                "contents": [{"parts": [{"text": prompt_text}], "role": "user"}],
+                "tools": [{"google_search": {}}], # Enable 2026 Search Grounding
+                "generation_config": MODEL_CONFIG
+            }
+        }
+        
+        # Write as a single line in the JSONL file
+        f.write(json.dumps(request_line) + "\n")
+
+print(f"Done! Created {len(df)} requests in {jsonl_output}")
+
+3. Why this structure works for you
+• The key field: Because the Batch API processes requests in parallel, the results might come back out of order. By including the brand name in the key, you can easily match the response back to your spreadsheet later.
+• Prompt Injecting: By using f-strings (f"..."), the script automatically creates 100 unique prompts.
+• Google Search Tool: Since Gemini 3.1 Pro’s internal knowledge cutoff is January 2025, the search tool is what allows the model to find "live" 2026 social media stats.
+4. How to run it
+Once you have generated your brand_research_batch.jsonl file, you simply upload and start the job as follows:
+from google import genai
+
+client = genai.Client(api_key="YOUR_API_KEY")
+
+# Upload the file you just created
+uploaded_file = client.files.upload(path="brand_research_batch.jsonl")
+
+# Start the Batch Job
+job = client.batches.create(
+    model="gemini-3.1-pro-preview",
+    src=uploaded_file.name
+)
+
+print(f"Batch job {job.name} is now running. Check back in ~15 minutes.")
+
+Performance Expectation
+• Manual Loop: 100 minutes (1 brand at a time).
+• Batch API: ~15 to 20 minutes for all 100 brands at once.
+• Cost: You will be billed at a 50% discount compared to real-time API calls.
+Do you have any specific formatting requirements for the output (like wanting it in a JSON table or a list), or should the model just provide a standard text report?
+
+
+Yes, you can absolutely do that. In Colab Enterprise, the best way to handle this "controlling script" approach is to treat your sub-scripts as modular components. This keeps your workflow clean, allows you to debug one stage at a time, and makes it easy to swap out brands or parameters without re-running the entire pipeline.
+Since you are in an enterprise environment, you should use Google Cloud Storage (GCS) to store your input/output files. This ensures your data isn't lost if the Colab runtime disconnects.
+The Master Controller Strategy
+The most "Colab-native" way to do this is using the %run magic command. It executes separate .py files while allowing them to share the same Python variables (like your API_KEY or JOB_ID).
+Step 1: The Master Controller (Notebook Cell)
+This is your main hub. It orchestrates the flow.
+# --- CONFIGURATION ---
+BRAND_FILE = "brands_list.csv"
+JSONL_INPUT = "batch_input.jsonl"
+BATCH_JOB_ID = None # Will be populated by Script 2
+
+# --- EXECUTION PIPELINE ---
+print("🚀 Starting Brand Research Pipeline...")
+
+# 1. Prepare JSONL from Spreadsheet
+%run 1_preprocess.py
+
+# 2. Upload and Submit to Gemini
+%run 2_submit_job.py
+
+# 3. Wait and Monitor (This is the long part)
+%run 3_monitor.py
+
+# 4. Process Results and Export
+%run 4_export_results.py
+
+print("✅ Pipeline Complete!")
+
+Step 2: The 4 Modular Scripts
+You can create these files directly in the Colab file pane (left side) by right-clicking and selecting New File.
+Script 1: 1_preprocess.py (Data Prep)
+This takes your brand, category, and market and builds the specific prompt structure.
+import pandas as pd
+import json
+
+df = pd.read_csv(BRAND_FILE)
+requests = []
+
+for idx, row in df.iterrows():
+    prompt = f"Analyze {row['brand']} ({row['category']}) in the {row['market']} market. Get 2026 social stats."
+    
+    # We use 'custom_id' to track which result belongs to which brand
+    req = {
+        "custom_id": f"id_{idx}_{row['brand']}",
+        "request": {
+            "contents": [{"parts": [{"text": prompt}], "role": "user"}],
+            "tools": [{"google_search": {}}],
+            "generation_config": {"thinking_config": {"thinking_level": "MEDIUM"}}
+        }
+    }
+    requests.append(req)
+
+with open(JSONL_INPUT, "w") as f:
+    for r in requests:
+        f.write(json.dumps(r) + "\n")
+
+print(f"Created {len(requests)} requests in {JSONL_INPUT}")
+
+Script 2: 2_submit_job.py (API Trigger)
+This uploads your file and starts the engine.
+from google import genai
+
+client = genai.Client(api_key="YOUR_API_KEY")
+
+# Upload the JSONL
+input_file = client.files.upload(path=JSONL_INPUT)
+
+# Create the Batch Job
+batch_job = client.batches.create(
+    model="gemini-3.1-pro-preview",
+    src=input_file.name
+)
+
+BATCH_JOB_ID = batch_job.name # Pass this to the monitor script
+print(f"Job Created: {BATCH_JOB_ID}")
+
+Script 3: 3_monitor.py (The "Waiter")
+This script polls the API until the 100 brands are finished.
+import time
+
+print(f"Monitoring Job: {BATCH_JOB_ID}...")
+while True:
+    job_status = client.batches.get(name=BATCH_JOB_ID)
+    state = job_status.state
+    
+    if state == "SUCCEEDED":
+        print("🎉 Batch processing finished!")
+        OUTPUT_FILE_PATH = job_status.output_info.file_path
+        break
+    elif state in ["FAILED", "CANCELLED"]:
+        raise Exception(f"Job failed with state: {state}")
+    
+    print(f"Status: {state}... checking again in 60s")
+    time.sleep(60)
+
+Script 4: 4_export_results.py (Post-Processing)
+This downloads the results and maps them back to a final spreadsheet.
+# Download result file
+results_content = client.files.download(name=OUTPUT_FILE_PATH)
+
+final_data = []
+# Batch output is also JSONL
+for line in results_content.splitlines():
+    res = json.loads(line)
+    brand_id = res['custom_id']
+    answer = res['response']['candidates'][0]['content']['parts'][0]['text']
+    final_data.append({"request_id": brand_id, "analysis": answer})
+
+# Save to final CSV
+pd.DataFrame(final_data).to_csv("final_brand_report.csv", index=False)
+print("Final report saved to final_brand_report.csv")
+
+Why this is the best setup for 100 brands:
+1. Fault Tolerance: If script 3 fails (e.g., your internet blips), you don't have to re-run script 1 and 2. You can just re-run the monitor script using the BATCH_JOB_ID that is already in memory.
+2. Modular Parameters: If you decide you want thinking_level: "HIGH" for just the "Deep Strategy" set, you only have to edit 1_preprocess.py.
+3. Cost Monitoring: By separating the steps, you can verify your JSONL file looks correct before you hit "Submit" and start getting billed for 100 requests.
+Quick Note on Colab Enterprise Tips:
+• Mount Drive: If you want your files to persist forever, run from google.colab import drive; drive.mount('/content/drive') at the very top.
+• Secrets: Don't paste your API Key directly into the scripts. Use the "Secrets" tab in Colab (the key icon on the left) and access it via from google.colab import userdata; api_key = userdata.get('GEMINI_KEY').
+Are you planning to run this once a week, or is this a one-time deep dive into these brands?
+
+In Colab Enterprise, the choice between .py scripts and a notebook approach (modular cells) depends entirely on whether you prioritize automation or analysis.
+For your specific task—brand research and data extraction—the Notebook Approach (Modular Cells) is generally superior because it allows you to visualize the social media stats and market views immediately after they are generated.
+Comparison: Scripts vs. Notebooks
+Feature	Notebook Approach (Cells)	Script Approach (.py files)
+Visibility	Excellent. You can see dataframes and charts instantly.	Poor. You must open files or check logs to see progress.
+State	Persistent. Variables stay in memory between steps.	Ephemeral. Each script must re-load data/auth.
+Automation	Easy. You can "Schedule" a notebook in Colab Enterprise.	Harder. Requires a task runner or Airflow/Vertex Pipeline.
+Best For	Research, reporting, and dashboarding.	Production APIs and CI/CD pipelines.
+The "Best of Both Worlds" Strategy
+Since you're in Colab Enterprise, use a Single Master Notebook with Modular Cells. This gives you the structure of 4 separate scripts without the headache of managing 4 separate files.
+Cell 1: The Pre-processor
+This takes your spreadsheet and generates the requests.jsonl file.
+# Cell 1: Convert Spreadsheet to Gemini Batch JSONL
+import pandas as pd, json
+df = pd.read_csv("brands.csv")
+
+with open("batch_input.jsonl", "w") as f:
+    for i, row in df.iterrows():
+        payload = {
+            "custom_id": f"id_{i}_{row['brand']}",
+            "request": {
+                "contents": [{"parts": [{"text": f"Stats for {row['brand']} in {row['market']}"}]}],
+                "tools": [{"google_search": {}}],
+                "generation_config": {"thinking_config": {"thinking_level": "MEDIUM"}}
+            }
+        }
+        f.write(json.dumps(payload) + "\n")
+
+Cell 2: The Submitter
+This cell handles the API handshake and file upload.
+# Cell 2: Upload and Trigger Batch Job
+from google import genai
+client = genai.Client(api_key="YOUR_API_KEY")
+input_file = client.files.upload(path="batch_input.jsonl")
+batch_job = client.batches.create(model="gemini-3.1-pro-preview", src=input_file.name)
+JOB_ID = batch_job.name # Stored in memory for Cell 3
+
+Cell 3: The Monitor
+This cell loops until the 100 brands are finished. Because it's a cell, you can see the progress bar right under it.
+# Cell 3: Poll for Completion
+import time
+while True:
+    status = client.batches.get(name=JOB_ID).state
+    if status == "SUCCEEDED": break
+    print(f"Status: {status} at {time.strftime('%H:%M:%S')}")
+    time.sleep(60)
+
+Cell 4: The Reporter
+This is where the notebook shines—you can turn the results into a beautiful table or chart.
+# Cell 4: Export to CSV and Show Table
+output = client.files.download(name=client.batches.get(name=JOB_ID).output_info.file_path)
+results_df = pd.DataFrame([json.loads(l) for l in output.splitlines()])
+display(results_df.head()) # Immediate visual feedback
+
+If you prefer the "4 Script" method
+If you still want separate files (e.g., to keep your code clean or for Git version control), you can use the %run magic command in your main Colab cell.
+1. Create 4 files in your Colab file explorer: 1_prep.py, 2_submit.py, 3_monitor.py, 4_export.py.
+2. In your main notebook cell, run them sequentially:
+%run 1_prep.py
+%run 2_submit.py
+%run 3_monitor.py
+%run 4_export.py
+
+Note: Variables defined in 1_prep.py will stay in memory and be accessible to 2_submit.py when using %run.
+Why this is best for Gemini 3.1 Pro Preview
+In 2026, the Batch API is asynchronous. If you run this as a single script and your Colab runtime disconnects (which happens often in Enterprise after 90 minutes of inactivity), you might lose your place. With the Notebook/Modular approach, you can simply restart the Monitor cell using the JOB_ID printed in the console, without paying for the 100 brand requests all over again.
+Pro Tip: Since you are in Colab Enterprise, use Vertex AI as your backend. It handles authentication automatically via your Google Cloud project, so you don't have to manage API keys in your scripts.
+Do you have a specific visualization in mind for the brand stats (e.g., a bar chart comparing engagement), or are you primarily focused on the raw CSV output?
+
+
+Yes, you absolutely can. In fact, Google Antigravity (the agent-first IDE released late last year) is arguably the most efficient way to build the modular pipeline we just discussed.
+While many people still think of "antigravity" as just that old Python joke that opens an XKCD comic, in 2026, it’s Google’s flagship platform for agentic development. It doesn't just "suggest" code; it functions as an autonomous collaborator that can plan, write, and—most importantly for your brand research—test and verify your logic in a live environment.
+How Antigravity Would Build Your Brand Research Tool
+Instead of you manually writing those 4 scripts, you would provide Antigravity with a "Mission." Because it has a massive Gemini 3 context window, it can digest your entire spreadsheet structure and API requirements at once.
+Here is how the workflow looks in Antigravity:
+1. The Mission: You feed it a prompt like: "Create a modular Python pipeline for 100-brand market research using the Gemini 3.1 Pro Batch API. Read from 'brands.csv', generate JSONL with Google Search grounding, and handle the batch monitoring loop."
+2. The Plan: Instead of just dumping code, Antigravity generates an Implementation Plan. It will suggest creating the 4-script modular structure we discussed earlier (Preprocessing, Submission, Monitoring, Exporting).
+3. Autonomous Execution: Once you approve the plan, the agent opens the terminal, installs the necessary google-genai and pandas libraries, and writes the code into your workspace.
+4. Verification: This is the "killer feature." Antigravity will actually run a test batch with 1 or 2 brands to ensure the JSONL formatting is correct and the API response maps back to your CSV correctly before you commit to the full 100-brand run.
+Using Antigravity vs. Colab Enterprise
+Since you mentioned you are in Colab Enterprise, it’s important to note the difference in "vibes":
+• Colab Enterprise is your Cloud Playground. It's perfect for when you want to run your code on Google’s infrastructure, share notebooks with stakeholders, and see live charts.
+• Antigravity is your Architect's Studio. It is a standalone IDE (a fork of VS Code) that you download. You would use Antigravity to build the complex scripts/notebooks, and then upload those finished "Artifacts" to Colab Enterprise to actually execute the 100-brand production run.
+Pro-Tip: Use "Planning Mode"
+When you open the Agent Side Panel in Antigravity (Cmd + L), make sure to toggle it to "Planning Mode" for this project.
+Because your task involves specific API parameters like thinking_level and Google Search tools, Planning Mode ensures the agent doesn't skip the "boring" but critical parts—like making sure your custom_id correctly tracks which brand is which in the Batch output.
+Your Antigravity "Mission" Prompt:
+"Act as a Lead Data Engineer. Build a production-grade brand analysis tool in Python. It must use the Gemini 3.1 Pro Preview Batch API with thinking_level='medium'. Use a spreadsheet as input and ensure every request is grounded with Google Search. Structure the code into a modular 'controller' format so I can run it in Colab Enterprise."
+If you describe it that fully, Antigravity won't just write the code—it'll practically hand you the keys to the finished project. Are you planning to download the IDE locally, or are you looking for the specific code snippets to stay strictly within the Colab browser?
+
